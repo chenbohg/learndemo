@@ -1,0 +1,141 @@
+package com.taotao.web.controller;
+
+import java.io.IOException;
+import java.util.List;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.servlet.ModelAndView;
+
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.taotao.common.utils.CookieUtils;
+import com.taotao.web.pojo.Cart;
+import com.taotao.web.pojo.User;
+import com.taotao.web.service.CartCookieService;
+import com.taotao.web.service.CartService;
+import com.taotao.web.service.UserService;
+import com.taotao.web.threadlocal.UserThreadLocal;
+/**
+ * 购物车控制器
+ * @author Administrator
+ *
+ */
+@RequestMapping("cart")
+@Controller
+public class CartController {
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private CartService cartService;
+    
+    @Autowired
+    private CartCookieService cartCookieService;
+
+    /**
+     * 添加商品到购物车
+     */
+    @RequestMapping(value = "add/{itemId}", method = RequestMethod.GET)
+    public String addItemToCart(@PathVariable("itemId") Long itemId,
+            @CookieValue(value = UserService.TAOTAO_TICKET, required = false) String ticket,
+            HttpServletRequest request, HttpServletResponse response) {
+        // 判断用户是否登录
+        User user = this.userService.queryUserByticket(CookieUtils.getCookieValue(request,
+                UserService.TAOTAO_TICKET));
+        if (user == null) {
+            // 没有登录
+            //添加商品到cookie购物车
+            this.cartCookieService.addItemToCart(itemId,request,response);
+        } else {
+            this.cartService.addItemToCart(itemId, user);
+        }
+        // 跳转到购物车列表页
+        return "redirect:/cart/show.html";
+    }
+
+    /**
+     * 显示购物车 两种情况：登录状态、没有登录状态
+     */
+    @RequestMapping(value = "show", method = RequestMethod.GET)
+    public ModelAndView show(@CookieValue(value = UserService.TAOTAO_TICKET, required = false) String ticket,
+            HttpServletRequest request) {
+        User user = UserThreadLocal.get();
+        List<Cart> carts = null;
+        if (user == null) {
+            // 没有登录
+            // 实现Cookie购物车
+            try {
+                carts = this.cartCookieService.queryCartList(request);
+                
+            } catch (Exception e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+        } else {
+            carts = this.cartService.queryCartList(user);
+        }
+        ModelAndView mv = new ModelAndView("cart");
+        mv.addObject("cartList", carts);
+        return mv;
+    }
+
+    /**
+     * 更新购物车商品数量
+     * @param itemId
+     * @param num
+     */
+    // http://www.taotao.com/service/cart/update/num/1474391928/5
+    @RequestMapping(value = "update/num/{itemId}/{num}", method = RequestMethod.POST)
+    public ResponseEntity<Void> updateCart(@PathVariable("itemId") Long itemId,
+            @PathVariable("num") Integer num,HttpServletRequest request,HttpServletResponse response) {
+        //判断用户是否登录 
+        User user = UserThreadLocal.get();
+        if (user == null) {
+            // 没有登录
+            this.cartCookieService.updateCart(itemId,num,request,response);
+        }else{
+            //已登录
+            Boolean bool = this.cartService.updateCart(user,itemId,num);
+            if (bool) {
+                return ResponseEntity.ok(null);
+            }
+        }
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+    }
+    
+    /**
+     * 从购物车中删除商品
+     * @param itemId
+     * @return
+     */
+    //http://www.taotao.com/cart/delete/1474391928.html
+    @RequestMapping(value="delete/{itemId}",method=RequestMethod.GET)
+    public String deleteItemFromCart(@PathVariable("itemId") Long itemId,HttpServletRequest request,HttpServletResponse response){
+      //判断用户是否登录 
+        User user = UserThreadLocal.get();
+        if (user == null) {
+            // 没有登录
+            this.cartCookieService.deleteItemFromCart(itemId,request,response);
+            return "redirect:/cart/show.html";
+        }else{
+            Boolean bool = this.cartService.deleteItemFromCart(user,itemId);
+            if (bool) {
+             // 跳转到购物车列表页
+                return "redirect:/cart/show.html";
+            }
+        }
+        return null;
+    }
+    
+    
+}
